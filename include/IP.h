@@ -4,6 +4,7 @@
 #include <vector>
 #include <cstdint>
 #include <cstring>
+#include <iostream>
 
 class IPPacket {
 public:
@@ -66,6 +67,28 @@ public:
         return IPPacket(protocol, ntohl(src), ntohl(dest), payload);
     }
 
+    static std::vector<uint8_t> create_ip_header(uint32_t src_ip, uint32_t dest_ip, uint16_t length) {
+        std::vector<uint8_t> header(20, 0); // IPv4 header is 20 bytes
+
+        header[0] = 0x45; // Version and header length
+        header[1] = 0x00; // Type of service
+        header[2] = length >> 8; // Total length
+        header[3] = length & 0xFF;
+        header[4] = 0x00; // Identification
+        header[5] = 0x00;
+        header[6] = 0x40; // Flags and fragment offset
+        header[7] = 0x00;
+        header[8] = 64; // Time to live
+        header[9] = 0x11; // Protocol (UDP)
+        header[10] = 0x00; // Header checksum
+        header[11] = 0x00;
+        std::memcpy(&header[12], &src_ip, 4); // Source IP
+        std::memcpy(&header[16], &dest_ip, 4); // Destination IP
+
+        // TODO: Calculate and set the header checksum
+
+        return header;
+    }
 private:
     uint16_t calculate_checksum() const {
         uint32_t sum = 0;
@@ -78,5 +101,64 @@ private:
         return htons(~sum);
     }
 };
+
+class IP {
+public:
+    static std::vector<uint8_t> create_ip_header(uint32_t src_ip, uint32_t dest_ip, uint16_t length) {
+        std::vector<uint8_t> header(20, 0); // IPv4 header is 20 bytes
+
+        header[0] = 0x45; // Version and header length
+        header[1] = 0x00; // Type of service
+        header[2] = length >> 8; // Total length
+        header[3] = length & 0xFF;
+        header[4] = 0x00; // Identification
+        header[5] = 0x00;
+        header[6] = 0x20; // Flags and fragment offset
+        header[7] = 0x00;
+        header[8] = 64; // Time to live
+        header[9] = 0x11; // Protocol (UDP)
+        header[10] = 0x00; // Header checksum
+        header[11] = 0x00;
+        std::memcpy(&header[12], &src_ip, 4); // Source IP
+        std::memcpy(&header[16], &dest_ip, 4); // Destination IP
+
+        // TODO: Calculate and set the header checksum
+
+        return header;
+    }
+
+    static std::vector<std::vector<uint8_t>> fragment_packet(const std::vector<uint8_t>& packet, uint16_t mtu) {
+        std::vector<std::vector<uint8_t>> fragments;
+        uint16_t header_length = 20;
+        uint16_t max_data_length = mtu - header_length;
+        uint16_t packet_length = packet.size();
+        uint16_t offset = 0;
+
+        while (offset < packet_length) {
+            uint16_t data_length = min(max_data_length, packet_length - offset);
+            std::vector<uint8_t> fragment(header_length + data_length, 0);
+
+            std::memcpy(fragment.data(), packet.data(), header_length); // Copy header
+            std::memcpy(fragment.data() + header_length, packet.data() + offset, data_length); // Copy data
+
+            fragments.push_back(fragment);
+            offset += data_length;
+        }
+
+        return fragments;
+    }
+
+    static std::vector<uint8_t> reassemble_packet(const std::vector<std::vector<uint8_t>>& fragments) {
+        std::vector<uint8_t> packet;
+
+        for (const auto& fragment : fragments) {
+            packet.insert(packet.end(), fragment.begin(), fragment.end());
+        }
+
+        return packet;
+    }
+};
+
+
 
 #endif // IP_H

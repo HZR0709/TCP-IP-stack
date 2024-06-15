@@ -73,6 +73,34 @@ public:
         return TCPSegment(ntohs(src_port), ntohs(dest_port), ntohl(seq_num), ntohl(ack_num), payload, flags);
     }
 
+    static std::vector<uint8_t> create_tcp_header(uint16_t src_port, uint16_t dest_port, uint32_t seq_num, uint32_t ack_num, uint8_t flags, uint16_t window_size) {
+        std::vector<uint8_t> header(20, 0); // TCP header is 20 bytes
+
+        header[0] = src_port >> 8;
+        header[1] = src_port & 0xFF;
+        header[2] = dest_port >> 8;
+        header[3] = dest_port & 0xFF;
+        header[4] = seq_num >> 24;
+        header[5] = (seq_num >> 16) & 0xFF;
+        header[6] = (seq_num >> 8) & 0xFF;
+        header[7] = seq_num & 0xFF;
+        header[8] = ack_num >> 24;
+        header[9] = (ack_num >> 16) & 0xFF;
+        header[10] = (ack_num >> 8) & 0xFF;
+        header[11] = ack_num & 0xFF;
+        header[12] = (5 << 4); // Data offset (5 * 4 = 20 bytes)
+        header[13] = flags;
+        header[14] = window_size >> 8;
+        header[15] = window_size & 0xFF;
+        header[16] = 0x00; // Checksum
+        header[17] = 0x00;
+        header[18] = 0x00; // Urgent pointer
+        header[19] = 0x00;
+
+        // TODO: Calculate and set the header checksum
+
+        return header;
+    }
 private:
     uint16_t calculate_checksum() const {
         // 简单校验和计算，仅供示例

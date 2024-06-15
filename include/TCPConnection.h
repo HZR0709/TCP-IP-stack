@@ -10,6 +10,17 @@
 #include <thread>
 #include <map>
 
+#ifdef _WIN32
+#include <winsock2.h>
+#include <ws2tcpip.h>
+#pragma comment(lib, "ws2_32.lib")
+#else
+#include <sys/socket.h>
+#include <netinet/in.h>
+#include <arpa/inet.h>
+#include <unistd.h>
+#endif
+
 class TCPConnection {
 public:
     enum State {
@@ -36,7 +47,6 @@ public:
         dest_ip = d_addr;
     }
 
-
     void send_syn() {
         if (state == CLOSED) {
             TCPSegment syn_segment(src_port, dest_port, seq_num, ack_num, {}, TCPSegment::SYN);
@@ -45,7 +55,7 @@ public:
             std::vector<uint8_t> serialized_ip_syn_packet = ip_syn_packet.serialize();
             EthernetFrame ethernet_syn_frame(dest_mac, src_mac, 0x0800, serialized_ip_syn_packet);
             std::vector<uint8_t> serialized_ethernet_syn_frame = ethernet_syn_frame.serialize();
-            // 发送以太网帧（省略实际发送代码）
+            send_ethernet_frame(serialized_ethernet_syn_frame);
             log("Sending SYN");
             state = SYN_SENT;
         }
@@ -69,7 +79,7 @@ public:
             std::vector<uint8_t> serialized_ip_ack_packet = ip_ack_packet.serialize();
             EthernetFrame ethernet_ack_frame(dest_mac, src_mac, 0x0800, serialized_ip_ack_packet);
             std::vector<uint8_t> serialized_ethernet_ack_frame = ethernet_ack_frame.serialize();
-            // 发送以太网帧（省略实际发送代码）
+            send_ethernet_frame(serialized_ethernet_ack_frame);
             log("Received SYN-ACK, sending ACK");
             state = ESTABLISHED;
         }
@@ -83,7 +93,7 @@ public:
             std::vector<uint8_t> serialized_ip_ack_packet = ip_ack_packet.serialize();
             EthernetFrame ethernet_ack_frame(dest_mac, src_mac, 0x0800, serialized_ip_ack_packet);
             std::vector<uint8_t> serialized_ethernet_ack_frame = ethernet_ack_frame.serialize();
-            // 发送以太网帧（省略实际发送代码）
+            send_ethernet_frame(serialized_ethernet_ack_frame);
             log("Sending ACK");
             state = ESTABLISHED;
         }
@@ -97,7 +107,7 @@ public:
             std::vector<uint8_t> serialized_ip_fin_packet = ip_fin_packet.serialize();
             EthernetFrame ethernet_fin_frame(dest_mac, src_mac, 0x0800, serialized_ip_fin_packet);
             std::vector<uint8_t> serialized_ethernet_fin_frame = ethernet_fin_frame.serialize();
-            // 发送以太网帧（省略实际发送代码）
+            send_ethernet_frame(serialized_ethernet_fin_frame);
             log("Sending FIN");
             state = FIN_WAIT_1;
         }
@@ -118,7 +128,7 @@ public:
             std::vector<uint8_t> serialized_ip_ack_packet = ip_ack_packet.serialize();
             EthernetFrame ethernet_ack_frame(dest_mac, src_mac, 0x0800, serialized_ip_ack_packet);
             std::vector<uint8_t> serialized_ethernet_ack_frame = ethernet_ack_frame.serialize();
-            // 发送以太网帧（省略实际发送代码）
+            send_ethernet_frame(serialized_ethernet_ack_frame);
             log("Received FIN, sending ACK");
             state = TIME_WAIT;
         }
@@ -133,7 +143,7 @@ public:
             std::vector<uint8_t> serialized_ip_ack_packet = ip_ack_packet.serialize();
             EthernetFrame ethernet_ack_frame(dest_mac, src_mac, 0x0800, serialized_ip_ack_packet);
             std::vector<uint8_t> serialized_ethernet_ack_frame = ethernet_ack_frame.serialize();
-            // 发送以太网帧（省略实际发送代码）
+            send_ethernet_frame(serialized_ethernet_ack_frame);
             log("Received FIN in CLOSE_WAIT, sending ACK and transitioning to LAST_ACK");
             state = LAST_ACK;
         }
@@ -158,7 +168,7 @@ public:
     void retransmit_last_segment() {
         if (!sent_segments.empty()) {
             auto last_segment = sent_segments.rbegin();
-            // 发送最后的以太网帧（省略实际发送代码）
+            send_ethernet_frame(last_segment->second);
             log("Retransmitting segment with seq_num: " + std::to_string(last_segment->first));
         }
     }
@@ -201,6 +211,45 @@ private:
     std::map<uint32_t, std::vector<uint8_t>> sent_segments;
     std::chrono::steady_clock::time_point last_sent_time;
     const std::chrono::seconds timeout_duration = std::chrono::seconds(3);
+
+    void send_ethernet_frame(const std::vector<uint8_t>& frame) {
+#ifdef _WIN32
+        SOCKET sockfd = socket(AF_INET, SOCK_RAW, IPPROTO_RAW);
+        if (sockfd == INVALID_SOCKET) {
+            log("Failed to create socket.");
+            return;
+        }
+
+        sockaddr_in dest_addr;
+        dest_addr.sin_family = AF_INET;
+        dest_addr.sin_addr.s_addr = dest_ip;
+        dest_addr.sin_port = htons(dest_port);
+
+        if (sendto(sockfd, reinterpret_cast<const char*>(frame.data()), frame.size(), 0, (sockaddr*)&dest_addr, sizeof(dest_addr)) == SOCKET_ERROR) {
+            log("Failed to send frame.");
+        }
+
+        closesocket(sockfd);
+#else
+        int sockfd = socket(AF_PACKET, SOCK_RAW, htons(ETH_P_ALL));
+        if (sockfd < 0) {
+            log("Failed to create socket.");
+            return;
+        }
+
+        struct sockaddr_ll dest_addr = { 0 };
+        dest_addr.sll_ifindex = if_nametoindex("eth0");
+        dest_addr.sll_protocol = htons(ETH_P_IP);
+        dest_addr.sll_halen = ETH_ALEN;
+        memcpy(dest_addr.sll_addr, dest_mac, 6);
+
+        if (sendto(sockfd, frame.data(), frame.size(), 0, (struct sockaddr*)&dest_addr, sizeof(dest_addr)) < 0) {
+            log("Failed to send frame.");
+        }
+
+        close(sockfd);
+#endif
+    }
 };
 
 #endif // TCPCONNECTION_H

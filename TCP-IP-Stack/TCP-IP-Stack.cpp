@@ -5,14 +5,27 @@
 #include "Ethernet.h"
 #include "TCP.h"
 #include "UDP.h"
+#include "ARP.h"
+#include "ND.h"
 #include "IP.h"
+#include "ICMP.h"
 #include "TCPConnection.h"
 #include "NetworkInterface.h"
 #include "RoutingTable.h"
 #include "DHCPClient.h"
 #include "SLAACClient.h"
-#include "Network.h"    // 跨平台网络支持
 
+#include "Network.h"    // 跨平台网络支持
+#ifdef _WIN32
+#include <winsock2.h>
+#include <ws2tcpip.h>
+#pragma comment(lib, "ws2_32.lib")
+#else
+#include <sys/socket.h>
+#include <netinet/in.h>
+#include <arpa/inet.h>
+#include <unistd.h>
+#endif
 
 std::vector<uint8_t> create_dhcp_offer_packet(uint32_t yiaddr, uint32_t xid) {
     DHCPClient::DHCPMessage offer;
@@ -60,6 +73,14 @@ std::vector<uint8_t> create_ra_packet() {
 }
 
 int main() {
+#ifdef _WIN32
+    WSADATA wsaData;
+    if (WSAStartup(MAKEWORD(2, 2), &wsaData) != 0) {
+        std::cerr << "WSAStartup failed." << std::endl;
+        return 1;
+    }
+#endif
+
     init_network();  // 初始化网络（Windows）
 
     // 配置网络接口
@@ -97,28 +118,72 @@ int main() {
     std::vector<uint8_t> ra_packet = create_ra_packet();
     slaac_client.handle_ra(ra_packet);
 
-    // 添加IPv6路由
-    routing_table.add_route(Route(IPAddress("::/0"), IPAddress("::"), IPAddress("fe80::1")));
-    routing_table.add_route(Route(IPAddress("2001:db8::"), IPAddress("ffff:ffff:ffff:ffff::"), IPAddress("::")));
+    // 创建TCP连接并进行三次握手
+    TCPConnection tcp_conn(12345, 80, inet_addr("192.168.0.101"), inet_addr("192.168.0.1"));
+    tcp_conn.send_syn();
+    // 模拟接收SYN-ACK
+    TCPSegment syn_ack_segment(80, 12345, 0, 1, {}, TCPSegment::SYN | TCPSegment::ACK);
+    tcp_conn.receive_syn_ack(syn_ack_segment);
+    // 模拟接收ACK
+    tcp_conn.receive_ack();
+    // 模拟发送FIN
+    tcp_conn.send_fin();
+    // 模拟接收ACK for FIN
+    tcp_conn.receive_ack_for_fin();
+    // 模拟接收FIN
+    tcp_conn.receive_fin();
+    // 模拟接收ACK
+    tcp_conn.receive_ack();
 
-    // 查找路由
-    try {
-        Route route = routing_table.find_route(IPAddress("8.8.8.8"));
-        std::cout << "Route found: " << route.get_destination().to_string() << " via " << route.get_gateway().to_string() << std::endl;
-    }
-    catch (const std::runtime_error& e) {
-        std::cerr << e.what() << std::endl;
+    // 测试ARP协议
+    std::vector<uint8_t> arp_request = ARP::create_arp_request(inet_addr("192.168.0.100"), (uint8_t *)net_if.get_mac_address().data(), inet_addr("192.168.0.1"));
+    uint32_t src_ip, dest_ip;
+    uint8_t src_mac[6], dest_mac[6];
+    bool is_request;
+    if (ARP::parse_arp_packet(arp_request, src_ip, src_mac, dest_ip, dest_mac, is_request)) {
+        std::cout << "ARP Request parsed successfully" << std::endl;
     }
 
-    try {
-        Route route = routing_table.find_route(IPAddress("2001:4860:4860::8888"));
-        std::cout << "Route found: " << route.get_destination().to_string() << " via " << route.get_gateway().to_string() << std::endl;
+    // 测试ICMP Echo Request
+    std::vector<uint8_t> icmp_request = ICMP::create_echo_request(1, 1);
+    uint16_t id, seq;
+    std::cout << "ICMP Request packet: ";
+    for (const auto& byte : icmp_request) {
+        std::cout << std::hex << static_cast<int>(byte) << " ";
     }
-    catch (const std::runtime_error& e) {
-        std::cerr << e.what() << std::endl;
+    std::cout << std::endl;
+
+    // 解析 Echo Request
+    if (ICMP::parse_echo_request(icmp_request, id, seq)) {
+        std::cout << "ICMP Echo Request parsed successfully" << std::endl;
+        std::cout << "ID: " << id << ", Sequence: " << seq << std::endl;
+    }
+    else {
+        std::cout << "Failed to parse ICMP Echo Request" << std::endl;
+    }
+
+    // 创建并测试ICMP Echo Reply
+    std::vector<uint8_t> icmp_reply = ICMP::create_echo_reply(1, 1);
+    std::cout << "ICMP Reply packet: ";
+    for (const auto& byte : icmp_reply) {
+        std::cout << std::hex << static_cast<int>(byte) << " ";
+    }
+    std::cout << std::endl;
+
+    // 解析 Echo Reply
+    if (ICMP::parse_echo_reply(icmp_reply, id, seq)) {
+        std::cout << "ICMP Echo Reply parsed successfully" << std::endl;
+        std::cout << "ID: " << id << ", Sequence: " << seq << std::endl;
+    }
+    else {
+        std::cout << "Failed to parse ICMP Echo Reply" << std::endl;
     }
 
     cleanup_network();  // 清理网络（Windows）
+
+#ifdef _WIN32
+    WSACleanup();
+#endif
 
     return 0;
 }

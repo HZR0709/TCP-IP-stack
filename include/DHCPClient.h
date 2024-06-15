@@ -6,13 +6,24 @@
 #include <vector>
 #include <cstdint>
 #include <cstring>
-#include "Network.h"
+
+#ifdef _WIN32
+#include <winsock2.h>
+#include <ws2tcpip.h>
+#pragma comment(lib, "ws2_32.lib")
+#else
+#include <sys/socket.h>
+#include <netinet/in.h>
+#include <arpa/inet.h>
+#include <unistd.h>
+#endif
+
+//#include "Network.h"
 
 
 class DHCPClient {
 public:
-    DHCPClient(NetworkInterface& netif)
-        : net_interface(netif), transaction_id(0x12345678) {}
+    DHCPClient(NetworkInterface& netif);
 
     void send_dhcp_discover();
     void handle_dhcp_offer(const std::vector<uint8_t>& packet);
@@ -53,7 +64,9 @@ private:
     void send_udp_packet(const std::vector<uint8_t>& packet, uint16_t src_port, uint16_t dest_port, const std::string& dest_ip);
 };
 
-
+DHCPClient::DHCPClient(NetworkInterface& netif)
+    : net_interface(netif), transaction_id(0x12345678) {
+}
 
 void DHCPClient::send_dhcp_discover() {
     DHCPMessage discover;
@@ -169,13 +182,14 @@ void DHCPClient::parse_dhcp_options(const DHCPMessage& message) {
 }
 
 void DHCPClient::send_udp_packet(const std::vector<uint8_t>& packet, uint16_t src_port, uint16_t dest_port, const std::string& dest_ip) {
+#ifdef _WIN32
     SOCKET sockfd = socket(AF_INET, SOCK_DGRAM, 0);
-    if (sockfd < 0) {
+    if (sockfd == INVALID_SOCKET) {
         handle_dhcp_error("Failed to create socket.");
         return;
     }
 
-    BOOL broadcast = TRUE;
+    int broadcast = 1;
     if (setsockopt(sockfd, SOL_SOCKET, SO_BROADCAST, (char*)&broadcast, sizeof(broadcast)) < 0) {
         handle_dhcp_error("Failed to set socket options.");
         closesocket(sockfd);
@@ -188,13 +202,37 @@ void DHCPClient::send_udp_packet(const std::vector<uint8_t>& packet, uint16_t sr
     dest_addr.sin_port = htons(dest_port);
     inet_pton(AF_INET, dest_ip.c_str(), &dest_addr.sin_addr);
 
-    char SendBuf[1024];
-    int BufLen = 1024;
-    if (sendto(sockfd, (const char*)packet.data(), packet.size(), 0, (struct sockaddr*)&dest_addr, sizeof(dest_addr)) < 0) {
+    if (sendto(sockfd, (char*)packet.data(), packet.size(), 0, (struct sockaddr*)&dest_addr, sizeof(dest_addr)) < 0) {
         handle_dhcp_error("Failed to send packet.");
     }
 
     closesocket(sockfd);
+#else
+    int sockfd = socket(AF_INET, SOCK_DGRAM, 0);
+    if (sockfd < 0) {
+        handle_dhcp_error("Failed to create socket.");
+        return;
+    }
+
+    int broadcast = 1;
+    if (setsockopt(sockfd, SOL_SOCKET, SO_BROADCAST, &broadcast, sizeof(broadcast)) < 0) {
+        handle_dhcp_error("Failed to set socket options.");
+        close(sockfd);
+        return;
+    }
+
+    struct sockaddr_in dest_addr;
+    std::memset(&dest_addr, 0, sizeof(dest_addr));
+    dest_addr.sin_family = AF_INET;
+    dest_addr.sin_port = htons(dest_port);
+    inet_pton(AF_INET, dest_ip.c_str(), &dest_addr.sin_addr);
+
+    if (sendto(sockfd, packet.data(), packet.size(), 0, (struct sockaddr*)&dest_addr, sizeof(dest_addr)) < 0) {
+        handle_dhcp_error("Failed to send packet.");
+    }
+
+    close(sockfd);
+#endif
 }
 
 #endif // DHCPCLIENT_H
