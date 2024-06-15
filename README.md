@@ -1,5 +1,29 @@
 ## TCP/IP协议栈已经涵盖了以下四个层级中的部分内容：
 
+**控制台模拟输出：**
+```
+Sending DHCP Discover
+Received DHCP Offer: 192.168.0.100
+Sending DHCP Request
+Received DHCP Ack: 192.168.0.100
+Interface: eth0
+IP Address: 192.168.0.100
+Sending Router Solicitation
+Received Router Advertisement
+Configured global address: 2001:db8:ac10:fe01:20c:2936:bc17:0
+[CLOSED] Sending SYN
+[SYN_SENT] Received SYN-ACK, sending ACK
+[ESTABLISHED] Sending FIN
+[FIN_WAIT_1] Received ACK for FIN
+[FIN_WAIT_2] Received FIN, sending ACK
+ARP Request parsed successfully
+ICMP Request packet: 8 0 f7 fd 0 1 0 1
+ICMP Echo Request parsed successfully
+ID: 1, Sequence: 1
+ICMP Reply packet: 0 0 ff fd 0 1 0 1
+ICMP Echo Reply parsed successfully
+ID: 1, Sequence: 1
+```
 ### 应用层：
 实现了部分应用层协议，如DHCP客户端和SLAAC（无状态地址自动配置）。
 ### 传输层：
